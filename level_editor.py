@@ -1,4 +1,5 @@
 import bpy
+import math
 
 # ブレンダーに登録するアドオン情報
 bl_info = {
@@ -21,9 +22,29 @@ class MYADDON_OT_export_scene(bpy.types.Operator):
     bl_description = "シーン情報をExprotします"
 
     def execute(self,context):
+
         print("シーン情報をExprotします")
-        
-        print(bpy.context.scene.objects)
+
+        #シーン内すべてのオブジェクトについて
+        for object in bpy.context.scene.objects:
+            print(object.type + " - " + object.name)
+
+            #型はVector3,Quaternion,Vector3
+            trans,rot,scale = object.matrix_local.decompose()
+            #回転をQuaternionからEulerに変換
+            rot = rot.to_euler()
+            #ラジアンから度数法に変換
+            rot.x = math.degrees(rot.x)
+            rot.y = math.degrees(rot.y)
+            rot.z = math.degrees(rot.z)
+            #トランスフォーム情報を表示
+            print("Trans(%f,%f,%f)" % (trans.x,trans.y, trans.z))
+            print("Rot(%f,%f,%f,)" % (rot.x,rot.y,rot.z))
+            print("Scale(%f,%f,%f)" % (scale.x,scale.y,scale.z))
+            #親オブジェクトの名前表示
+            if object.parent:
+                print("Parent:" + object.parent.name)
+            print()
         
         print("シーン情報をExprotしました")
         self.report({'INFO'},"シーン情報をExprotしました")
@@ -33,7 +54,7 @@ class MYADDON_OT_export_scene(bpy.types.Operator):
 
 class MYADDON_OT_strecth_vertex(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_strecth_vertx"
-    bl_lavbel = "頂点を伸ばす"
+    bl_label = "頂点を伸ばす"
     bl_description = "頂点座標を引っ張って伸ばします"
     #リドゥ、アンドゥ可能オプション
     bl_options = {'REGISTER','UNDO'}
@@ -73,11 +94,11 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
 
         #トップバーの「エディターメニュー」に項目（オペレータ）を追加
         self.layout.operator(MYADDON_OT_strecth_vertex.bl_idname,
-             text=MYADDON_OT_strecth_vertex.bl_lavbel)
+             text=MYADDON_OT_strecth_vertex.bl_label)
 
         self.layout.operator(MYADDON_OT_create_ico_sphere.bl_idname,
              text=MYADDON_OT_create_ico_sphere.bl_label)
-        
+  
         self.layout.operator(MYADDON_OT_export_scene.bl_idname,
              text=MYADDON_OT_export_scene.bl_label)
 
@@ -90,9 +111,9 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
 
 # Blenderに登録するクラスリスト
 classes = (
-    MYADDON_OT_export_scene,
     MYADDON_OT_strecth_vertex,
     MYADDON_OT_create_ico_sphere,
+    MYADDON_OT_export_scene,
     TOPBAR_MT_my_menu,
 )
 
