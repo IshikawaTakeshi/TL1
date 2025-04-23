@@ -28,6 +28,19 @@ class MYADDON_OT_strecth_vertex(bpy.types.Operator):
 
         #オペレーターの命令終了を通知
         return {'FINISHED'}
+    
+class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_create_object"
+    bl_label = "ICO球生成"
+    bl_description = "ICO球を生成します"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    # メニューを実行したときに呼ばれる関数
+    def execute(self, context):
+        bpy.ops.mesh.primitive_ico_sphere_add()
+        print("ICO球を生成しました。")
+
+        return {'FINISHED'}
 
 #トップバーの拡張メニュー
 class TOPBAR_MT_my_menu(bpy.types.Menu):
@@ -45,6 +58,8 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
         self.layout.operator(MYADDON_OT_strecth_vertex.bl_idname,
              text=MYADDON_OT_strecth_vertex.bl_lavbel)
 
+        self.layout.operator(MYADDON_OT_create_ico_sphere.bl_idname,
+             text=MYADDON_OT_create_ico_sphere.bl_label)
 
     #既存のメニューにサブメニューを追加
     def submenu(self,context):
@@ -56,6 +71,7 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
 # Blenderに登録するクラスリスト
 classes = (
     MYADDON_OT_strecth_vertex,
+    MYADDON_OT_create_ico_sphere,
     TOPBAR_MT_my_menu,
 )
 
