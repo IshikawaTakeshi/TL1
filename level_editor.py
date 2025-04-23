@@ -14,6 +14,23 @@ bl_info = {
     "category": "Object"
 }
 
+#オペレータ シーン出力
+class MYADDON_OT_export_scene(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_export_scene"
+    bl_label = "シーン出力"
+    bl_description = "シーン情報をExprotします"
+
+    def execute(self,context):
+        print("シーン情報をExprotします")
+        
+        print(bpy.context.scene.objects)
+        
+        print("シーン情報をExprotしました")
+        self.report({'INFO'},"シーン情報をExprotしました")
+
+        return {'FINISHED'}
+    
+
 class MYADDON_OT_strecth_vertex(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_strecth_vertx"
     bl_lavbel = "頂点を伸ばす"
@@ -60,6 +77,9 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
 
         self.layout.operator(MYADDON_OT_create_ico_sphere.bl_idname,
              text=MYADDON_OT_create_ico_sphere.bl_label)
+        
+        self.layout.operator(MYADDON_OT_export_scene.bl_idname,
+             text=MYADDON_OT_export_scene.bl_label)
 
     #既存のメニューにサブメニューを追加
     def submenu(self,context):
@@ -70,6 +90,7 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
 
 # Blenderに登録するクラスリスト
 classes = (
+    MYADDON_OT_export_scene,
     MYADDON_OT_strecth_vertex,
     MYADDON_OT_create_ico_sphere,
     TOPBAR_MT_my_menu,
