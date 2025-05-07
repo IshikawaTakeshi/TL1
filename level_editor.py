@@ -1,5 +1,6 @@
 import bpy
 import math
+import bpx_extras
 
 # ブレンダーに登録するアドオン情報
 bl_info = {
@@ -16,10 +17,12 @@ bl_info = {
 }
 
 #オペレータ シーン出力
-class MYADDON_OT_export_scene(bpy.types.Operator):
+class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelper):
     bl_idname = "myaddon.myaddon_ot_export_scene"
     bl_label = "シーン出力"
     bl_description = "シーン情報をExprotします"
+    #出力するファイルの拡張子
+    filename_ext = ".scene"
 
     def execute(self,context):
 
