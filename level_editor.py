@@ -15,8 +15,9 @@ bl_info = {
     "tracker_url": "",
     "category": "Object"
 }
-
-#オペレータ シーン出力
+#///////////////////////////////////////////////////////////////////////////////////
+# オペレータ シーン出力
+#///////////////////////////////////////////////////////////////////////////////////
 class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelper):
     bl_idname = "myaddon.myaddon_ot_export_scene"
     bl_label = "シーン出力"
@@ -66,7 +67,7 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
             indent += "\t"
 
         #オブジェクト名書き込み
-        self.write_and_print(file,indent + object.type + "-" + object.name)
+        self.write_and_print(file,indent + object.type)
         trans,rot,scale = object.matrix_local.decompose()
         #回転をQuaternionからEulerに変換
         rot = rot.to_euler()
@@ -75,9 +76,13 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
         rot.y = math.degrees(rot.y)
         rot.z = math.degrees(rot.z)
         #トランスフォーム情報を表示
-        self.write_and_print(file,indent + "Trans(%f,%f,%f)" % (trans.x,trans.y,trans.z))
-        self.write_and_print(file,indent + "Rot(%f,%f,%f)" % (rot.x,rot.y,rot.z))
-        self.write_and_print(file,indent + "Scale(%f,%f,%f)" % (scale.x,scale.y,scale.z))
+        self.write_and_print(file,indent + "T(%f,%f,%f)" % (trans.x,trans.y,trans.z))
+        self.write_and_print(file,indent + "R(%f,%f,%f)" % (rot.x,rot.y,rot.z))
+        self.write_and_print(file,indent + "S(%f,%f,%f)" % (scale.x,scale.y,scale.z))
+        #カスタムプロパティ'file_name'
+        if "file_name" in object:
+            self.write_and_print(file, indent + "N %s" % object["file_name"])
+        self.write_and_print(file, indent + 'END')
         self.write_and_print(file,'')
 
         #子ノードへ進む(深さが1上がる)
@@ -89,8 +94,11 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
 
         file.write(str)
         file.write('\n')
-    
 
+  
+#///////////////////////////////////////////////////////////////////////////////////
+# 頂点を伸ばす
+#///////////////////////////////////////////////////////////////////////////////////
 class MYADDON_OT_strecth_vertex(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_strecth_vertx"
     bl_label = "頂点を伸ばす"
@@ -105,7 +113,10 @@ class MYADDON_OT_strecth_vertex(bpy.types.Operator):
 
         #オペレーターの命令終了を通知
         return {'FINISHED'}
-    
+
+#///////////////////////////////////////////////////////////////////////////////////
+# ICO球生成
+#///////////////////////////////////////////////////////////////////////////////////
 class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_create_object"
     bl_label = "ICO球生成"
@@ -118,8 +129,25 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
         print("ICO球を生成しました。")
 
         return {'FINISHED'}
+    
+#///////////////////////////////////////////////////////////////////////////////////
+# filename追加
+#///////////////////////////////////////////////////////////////////////////////////
+class MYADDON_OT_add_filename(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_add_filename"
+    bl_label = "FileName追加"
+    bl_description = "['file_name']カスタムプロパティを追加します"
+    bl_options = {"REGISTER","UNDO"}
 
-#トップバーの拡張メニュー
+    def execute(self,context):
+        #['file_name']カスタムプロパティの追加
+        context.object["file_name"] = ""
+        return {"FINISHED"}
+
+
+#///////////////////////////////////////////////////////////////////////////////////
+# トップバーの拡張メニュー
+#///////////////////////////////////////////////////////////////////////////////////
 class TOPBAR_MT_my_menu(bpy.types.Menu):
     #Blenderがクラスを識別するための固有の文字列
     bl_idname = "TOPBAR_MT_my_menu"
@@ -147,13 +175,37 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
         # ID指定でサブメニューを追加
         self.layout.menu(TOPBAR_MT_my_menu.bl_idname)
 
+#///////////////////////////////////////////////////////////////////////////////////
+# オブジェクトのファイルネームパネル
+#///////////////////////////////////////////////////////////////////////////////////
+class OBJECT_PT_file_name(bpy.types.Panel):
+    bl_idname      = "OBJECT_PT_file_name"
+    bl_label       = "FileName"
+    bl_space_type  = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context     = "object"
 
+    #サブメニュー描画
+    def draw(self,context):
+
+        #パネルに項目を追加
+        if "file_name" in context.object:
+            #既にプロパティがあれば、プロパティを表示
+            self.layout.prop(context.object, '["file_name"]',text=self.bl_label)
+        else:
+            #プロパティがなければ、プロパティ追加ボタンを表示
+            self.layout.operator(MYADDON_OT_add_filename.bl_idname)
+
+#///////////////////////////////////////////////////////////////////////////////////
 # Blenderに登録するクラスリスト
+#///////////////////////////////////////////////////////////////////////////////////
 classes = (
     MYADDON_OT_strecth_vertex,
     MYADDON_OT_create_ico_sphere,
     MYADDON_OT_export_scene,
+    MYADDON_OT_add_filename,
     TOPBAR_MT_my_menu,
+    OBJECT_PT_file_name,
 )
 
 # アドオン有効化時コールバック
@@ -182,6 +234,8 @@ def draw_menu_manual(self,context):
     
     self.layout.operator("wm.url_open_preset", text="Manual", icon="HELP")
    
+#///////////////////////////////////////////////////////////////////////////////////
 #main code
+#///////////////////////////////////////////////////////////////////////////////////
 if __name__ == "__main__":
     register()
