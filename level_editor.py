@@ -5,6 +5,7 @@ import gpu
 import gpu_extras.batch
 import copy
 import mathutils
+import json
 
 
 # ブレンダーに登録するアドオン情報
@@ -28,46 +29,84 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
     bl_label = "シーン出力"
     bl_description = "シーン情報をExprotします"
     #出力するファイルの拡張子
-    filename_ext = ".scene"
+    filename_ext = ".json"
+
 
     #==============================================================================
     # 実行関数
     #==============================================================================
     def execute(self,context):
 
+
         print("シーン情報をExprotします")
 
-        self.export()
-        
+
+        self.export_json()
+       
         print("シーン情報をExprotしました")
         self.report({'INFO'},"シーン情報をExprotしました")
 
+
         return {'FINISHED'}
-    
+   
     #==============================================================================
     # ファイルに出力
     #==============================================================================
     def export(self):
 
+
         print("シーン情報出力開始...%r" % self.filepath)
+
 
         #ファイルをテキスト形式で書き出し用にオープン
         #スコープを抜けると自動的にクローズされる
         with open(self.filepath,"wt") as file:
 
+
             #ファイルに文字列を書き込む
             self.write_and_print(file,"SCENE")
 
+
              #シーン内すべてのオブジェクトについて
             for object in bpy.context.scene.objects:
-                
+               
                 #親オブジェクトの名前表示
                 if object.parent:
                     continue
-                
+               
                 #シーン直下のオブジェクトをルートノード(深さ0)とし、再帰関数で走査
                 self.parse_scene_recursive(file,object,0)
 
+    #=============================================================================
+    # Json形式でファイル出力
+    #=============================================================================
+    def export_json(self):
+        """Json形式でファイル出力"""
+        #保存情報をまとめるdict
+        json_object_root = dict()
+        #ノード名
+        json_object_root["name"] = "scene"
+        #オブジェクトリストを作成
+        json_object_root["objects"] = list()
+        #シーン内の全オブジェクト走査してパック
+        for object in bpy.context.scene.objects:
+            #親オブジェクトがあるものはスキップ(代わりに親から呼び出す)
+            if object.parent:
+                continue
+            
+            #シーン直下のオブジェクトルートノードとし、再帰関数で走査
+            self.parse_scene_recursive_json(json_object_root["objects"],object,0)
+     
+        #オブジェクトをJSON文字列にエンコード
+        json_text = json.dumps(json_object_root,ensure_ascii=False,cls=json.JSONEncoder,indent=4)
+        #コンソールに出力してみる
+        print(json_text)
+        #ファイルをテキスト形式で書き出し用にオープン
+        #スコープを抜けると自動的にクローズされる
+        with open(self.filepath,"wt",encoding="utf-8") as file:
+            #ファイルに文字列を書き込む
+            file.write(json_text)
+    
     #==============================================================================
     # シーン解析用再帰関数
     #==============================================================================
@@ -76,6 +115,7 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
         indent = ''
         for i in range(level):
             indent += "\t"
+
 
         #オブジェクト名書き込み
         self.write_and_print(file,indent + object.type)
@@ -105,21 +145,72 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
             temp_str %= (object["collider_size"][0],object["collider_size"][1],object["collider_size"][2])
             self.write_and_print(file,temp_str)
 
+
         self.write_and_print(file, indent + 'END')
         self.write_and_print(file,'')
+
 
         #子ノードへ進む(深さが1上がる)
         for child in object.children:
             self.parse_scene_recursive(file,child,level + 1)
 
-    
+
+   
     def write_and_print(self,file,str):
         print(str)
+
 
         file.write(str)
         file.write('\n')
 
-  
+
+    def parse_scene_recursive_json(self,data_parent,object,level):
+        #シーンのオブジェクト1個分のjsonオブジェクト生成
+        json_object = dict()
+        #オブジェクト種類
+        json_object["type"] = object.type
+        #オブジェクト名
+        json_object["name"] = object.name
+        #Aその他情報をパック
+        trans,rot,scale = object.matrix_local.decompose()
+         #回転をQuaternionからEulerに変換
+        rot = rot.to_euler()
+        #ラジアンから度数法に変換
+        rot.x = math.degrees(rot.x)
+        rot.y = math.degrees(rot.y)
+        rot.z = math.degrees(rot.z)
+        #トランスフォーム情報をディクショナリに登録
+        transform = dict()
+        transform["translation"] = (trans.x,trans.y,trans.z)
+        transform["rotation"] = (rot.x,rot.y,rot.z)
+        transform["scaling"] = (scale.x,scale.y,scale.z)
+        #まとめて一個分のjsonオブジェクトに登録
+        json_object["transform"] = transform
+
+        #カスタムプロパティ'file_name'
+        if "file_name" in object:
+            json_object["file_name"] = object["file_name"]
+        
+        #カスタムプロパティ'collider'
+        if "collider" in object:
+            collider = dict()
+            collider["type"] = object["collider"]
+            collider["center"] = object["collider_center"].to_list()
+            collider["size"] = object["collider_size"].to_list()
+            json_object["collider"] = collider
+
+        #1個分のjsonオブジェクトを親オブジェクトに登録
+        data_parent.append(json_object)
+        #B直接の子供リストを走査
+        if len(object.children) > 0:
+            json_object["children"] = list()
+
+        #子ノードへ進む
+        for child in object.children:
+            self.parse_scene_recursive_json(json_object["children"],child,level + 1)
+        
+        
+ 
 #///////////////////////////////////////////////////////////////////////////////////
 # 頂点を伸ばす
 #///////////////////////////////////////////////////////////////////////////////////
@@ -129,14 +220,16 @@ class MYADDON_OT_strecth_vertex(bpy.types.Operator):
     bl_description = "頂点座標を引っ張って伸ばします"
     #リドゥ、アンドゥ可能オプション
     bl_options = {'REGISTER','UNDO'}
-      
+     
     #メニューを実行した時に呼ばれるコールバック関数
     def execute(self,context):
         bpy.data.objects["Cube"].data.vertices[0].co.x += 1.0
         print("頂点を伸ばしました")
 
+
         #オペレーターの命令終了を通知
         return {'FINISHED'}
+
 
 #///////////////////////////////////////////////////////////////////////////////////
 # ICO球生成
@@ -147,13 +240,15 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
     bl_description = "ICO球を生成します"
     bl_options = {'REGISTER', 'UNDO'}
 
+
     # メニューを実行したときに呼ばれる関数
     def execute(self, context):
         bpy.ops.mesh.primitive_ico_sphere_add()
         print("ICO球を生成しました。")
 
+
         return {'FINISHED'}
-    
+   
 #///////////////////////////////////////////////////////////////////////////////////
 # filename追加
 #///////////////////////////////////////////////////////////////////////////////////
@@ -163,10 +258,12 @@ class MYADDON_OT_add_filename(bpy.types.Operator):
     bl_description = "['file_name']カスタムプロパティを追加します"
     bl_options = {"REGISTER","UNDO"}
 
+
     def execute(self,context):
         #['file_name']カスタムプロパティの追加
         context.object["file_name"] = ""
         return {"FINISHED"}
+
 
 #///////////////////////////////////////////////////////////////////////////////////
 # collider追加
@@ -177,13 +274,16 @@ class MYADDON_OT_add_collider(bpy.types.Operator):
     bl_description = "['collider']カスタムプロパティを追加します"
     bl_options = {"REGISTER","UNDO"}
 
+
     def execute(self,context):
+
 
         #['collider']カスタムプロパティ追加
         context.object["collider"] = "BOX"
         context.object["collider_center"] = mathutils.Vector((0,0,0))
         context.object["collider_size"] = mathutils.Vector((2,2,2))
         return {"FINISHED"}
+
 
 #///////////////////////////////////////////////////////////////////////////////////
 # トップバーの拡張メニュー
@@ -196,24 +296,30 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
     #著者表示用の文字列
     bl_description = "拡張メニュー by " + bl_info["author"]
 
+
     #サブメニューの描画
     def draw(self,context):
+
 
         #トップバーの「エディターメニュー」に項目（オペレータ）を追加
         self.layout.operator(MYADDON_OT_strecth_vertex.bl_idname,
              text=MYADDON_OT_strecth_vertex.bl_label)
 
+
         self.layout.operator(MYADDON_OT_create_ico_sphere.bl_idname,
              text=MYADDON_OT_create_ico_sphere.bl_label)
-  
+ 
         self.layout.operator(MYADDON_OT_export_scene.bl_idname,
              text=MYADDON_OT_export_scene.bl_label)
+
 
     #既存のメニューにサブメニューを追加
     def submenu(self,context):
 
+
         # ID指定でサブメニューを追加
         self.layout.menu(TOPBAR_MT_my_menu.bl_idname)
+
 
 #///////////////////////////////////////////////////////////////////////////////////
 # オブジェクトのファイルネームパネル
@@ -225,8 +331,10 @@ class OBJECT_PT_file_name(bpy.types.Panel):
     bl_region_type = "WINDOW"
     bl_context     = "object"
 
+
     #サブメニュー描画
     def draw(self,context):
+
 
         #パネルに項目を追加
         if "file_name" in context.object:
@@ -235,7 +343,7 @@ class OBJECT_PT_file_name(bpy.types.Panel):
         else:
             #プロパティがなければ、プロパティ追加ボタンを表示
             self.layout.operator(MYADDON_OT_add_filename.bl_idname)
-        
+       
 #///////////////////////////////////////////////////////////////////////////////////
 #パネル　collider
 #///////////////////////////////////////////////////////////////////////////////////
@@ -246,8 +354,10 @@ class OBJECT_PT_collider(bpy.types.Panel):
     bl_region_type = "WINDOW"
     bl_context     = "object"
 
+
     #サブメニュー描画
     def draw(self,context):
+
 
         if "collider" in context.object:
             #既にプロパティがあれば、プロパティを表示
@@ -258,21 +368,27 @@ class OBJECT_PT_collider(bpy.types.Panel):
             self.layout.operator(MYADDON_OT_add_collider.bl_idname)
 
 
+
+
 #///////////////////////////////////////////////////////////////////////////////////
 # コライダー描画
 #///////////////////////////////////////////////////////////////////////////////////
 class DrawCollider:
 
+
     #描画ハンドル
     handle = None
 
+
     #3Dビューに登録する描画関数
     def draw_collider():
+
 
         #頂点データ
         vertices = {"pos":[]}
         #インデックスデータ
         indices = []
+
 
         #各頂点の、オブジェクト中心からのオフセット
         offsets = [
@@ -286,26 +402,31 @@ class DrawCollider:
             [+0.5,+0.5,+0.5],
         ]
 
+
         #現在シーンのオブジェクトリストを走査
         for object in bpy.context.scene.objects:
+
 
             #コライダープロパティがなければ、描画をスキップ
             if not "collider" in object:
                 continue
 
+
             #中心点、サイズの変数を宣言
             center = mathutils.Vector((0,0,0))
             size   = mathutils.Vector((2,2,2))
 
+
             #プロパティから値を取得
             center=mathutils.Vector(object["collider_center"])
             size=mathutils.Vector(object["collider_size"])
-            
+           
             #追加前の頂点数
             start = len(vertices["pos"])
-            
+           
             #Boxの8頂点分for文を回す
             for offset in offsets:
+
 
                 pos = copy.copy(center)
                 #中心点を基準に各頂点毎にずらす
@@ -332,11 +453,14 @@ class DrawCollider:
                 indices.append([start+2,start+6])
                 indices.append([start+3,start+7])
 
+
         #ビルトインのシェーダを取得
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
 
+
         #バッチを作成(引数：シェーダ、トポロジー、頂点データ、インデックスデータ)
         batch = gpu_extras.batch.batch_for_shader(shader,"LINES",vertices,indices=indices)
+
 
         #シェーダのパラメータ設定
         color = [0.5, 1.0, 1.0, 1.0]
@@ -344,6 +468,7 @@ class DrawCollider:
         shader.uniform_float("color",color)
         #描画
         batch.draw(shader)
+
 
 #///////////////////////////////////////////////////////////////////////////////////
 # Blenderに登録するクラスリスト
@@ -359,20 +484,24 @@ classes = (
     OBJECT_PT_collider,
 )
 
+
 #===================================================================================
 # アドオン有効化時コールバック
 #===================================================================================
 def register():
 
+
     #Blenderにクラスを登録
     for cls in classes:
         bpy.utils.register_class(cls)
+
 
     #メニューに項目を追加
     bpy.types.TOPBAR_MT_editor_menus.append(TOPBAR_MT_my_menu.submenu)
     #3Dビューに描画関数を追加
     DrawCollider.handle = bpy.types.SpaceView3D.draw_handler_add(DrawCollider.draw_collider,(),"WINDOW","POST_VIEW")
     print("レベルエディタが有効化されました。")
+
 
 #===================================================================================
 # アドオン無効化時コールバック
@@ -383,16 +512,18 @@ def unregister():
     #3dビューからクラスを削除
     bpy.types.SpaceView3D.draw_handler_remove(DrawCollider.handle,"WINDOW")
 
+
     #Blenderからクラスを削除
     for cls in classes:
         bpy.utils.unregister_class(cls)
     print("レベルエディタが無効化されました。")
 
+
 #===================================================================================
 # メニュー項目描画
 #===================================================================================
 def draw_menu_manual(self,context):
-    
+   
     self.layout.operator("wm.url_open_preset", text="Manual", icon="HELP")
    
 #///////////////////////////////////////////////////////////////////////////////////
@@ -400,3 +531,4 @@ def draw_menu_manual(self,context):
 #///////////////////////////////////////////////////////////////////////////////////
 if __name__ == "__main__":
     register()
+
