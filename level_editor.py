@@ -1,6 +1,10 @@
 import bpy
 import math
 import bpy_extras
+import gpu
+import gpu_extras.batch
+import copy
+
 
 # ブレンダーに登録するアドオン情報
 bl_info = {
@@ -197,6 +201,79 @@ class OBJECT_PT_file_name(bpy.types.Panel):
             self.layout.operator(MYADDON_OT_add_filename.bl_idname)
 
 #///////////////////////////////////////////////////////////////////////////////////
+# コライダー描画
+#///////////////////////////////////////////////////////////////////////////////////
+class DrawCollider:
+
+    #描画ハンドル
+    handle = None
+
+    #3Dビューに登録する描画関数
+    def draw_collider():
+
+        #頂点データ
+        vertices = {"pos":[]}
+        #インデックスデータ
+        indices = []
+
+        #各頂点の、オブジェクト中心からのオフセット
+        offsets = [
+            [-0.5,-0.5,-0.5],
+            [+0.5,-0.5,-0.5],
+            [-0.5,+0.5,-0.5],
+            [+0.5,+0.5,-0.5],
+            [-0.5,-0.5,+0.5],
+            [+0.5,-0.5,+0.5],
+            [-0.5,+0.5,+0.5],
+            [+0.5,+0.5,+0.5],
+        ]
+
+        #立方体のX,Y,Z方向のサイズ
+        size = [2,2,2]
+
+        #現在シーンのオブジェクトリストを走査
+        for object in bpy.context.scene.objects:
+            start = len(vertices["pos"])
+
+            for offset in offsets:
+
+                pos = copy.copy(object.location)
+                #中心点を基準に各頂点毎にずらす
+                pos[0]+=offset[0]*size[0]
+                pos[1]+=offset[1]*size[1]
+                pos[2]+=offset[2]*size[2]
+                #頂点データリストに座標を追加
+                vertices['pos'].append(pos)
+                #前面を構成する辺の頂点インデックス
+                indices.append([start+0,start+1])
+                indices.append([start+2,start+3])
+                indices.append([start+0,start+2])
+                indices.append([start+1,start+3])
+                #奥面
+                indices.append([start+4,start+5])
+                indices.append([start+6,start+7])
+                indices.append([start+4,start+6])
+                indices.append([start+5,start+7])
+                #前と頂点を繋ぐ辺の頂点インデックス
+                indices.append([start+0,start+4])
+                indices.append([start+1,start+5])
+                indices.append([start+2,start+6])
+                indices.append([start+3,start+7])
+
+        #ビルトインのシェーダを取得
+        shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+
+        #バッチを作成(引数：シェーダ、トポロジー、頂点データ、インデックスデータ)
+        batch = gpu_extras.batch.batch_for_shader(shader,"LINES",vertices,indices=indices)
+
+        #シェーダのパラメータ設定
+        color = [0.5, 1.0, 1.0, 1.0]
+        shader.bind()
+        shader.uniform_float("color",color)
+        #描画
+        batch.draw(shader)
+
+#///////////////////////////////////////////////////////////////////////////////////
 # Blenderに登録するクラスリスト
 #///////////////////////////////////////////////////////////////////////////////////
 classes = (
@@ -208,7 +285,9 @@ classes = (
     OBJECT_PT_file_name,
 )
 
+#===================================================================================
 # アドオン有効化時コールバック
+#===================================================================================
 def register():
 
     #Blenderにクラスを登録
@@ -217,19 +296,27 @@ def register():
 
     #メニューに項目を追加
     bpy.types.TOPBAR_MT_editor_menus.append(TOPBAR_MT_my_menu.submenu)
+    #3Dビューに描画関数を追加
+    DrawCollider.handle = bpy.types.SpaceView3D.draw_handler_add(DrawCollider.draw_collider,(),"WINDOW","POST_VIEW")
     print("レベルエディタが有効化されました。")
 
+#===================================================================================
 # アドオン無効化時コールバック
+#===================================================================================
 def unregister():
     #メニューから項目を削除
     bpy.types.TOPBAR_MT_editor_menus.remove(TOPBAR_MT_my_menu.submenu)
+    #3dビューからクラスを削除
+    bpy.types.SpaceView3D.draw_handler_remove(DrawCollider.handle,"WINDOW")
 
     #Blenderからクラスを削除
     for cls in classes:
         bpy.utils.unregister_class(cls)
     print("レベルエディタが無効化されました。")
 
+#===================================================================================
 # メニュー項目描画
+#===================================================================================
 def draw_menu_manual(self,context):
     
     self.layout.operator("wm.url_open_preset", text="Manual", icon="HELP")
