@@ -452,38 +452,29 @@ class MYADDON_OT_remove_collider(bpy.types.Operator):
         return {'FINISHED'}
     
 #///////////////////////////////////////////////////////////////////////////////////
-# カスタムプロパティの一括変更
+# FileNameの一括変更
 #///////////////////////////////////////////////////////////////////////////////////   
-class MYADDON_OT_batch_set_custom_property(bpy.types.Operator):
-    bl_idname = "myaddon.batch_set_custom_property"
-    bl_label = "カスタムプロパティ一括変更"
-    bl_description = "選択中のオブジェクトのカスタムプロパティを一括で変更します"
+class MYADDON_OT_batch_set_filename(bpy.types.Operator):
+    bl_idname = "myaddon.batch_set_filename"
+    bl_label = "FileName一括設定"
+    bl_description = "選択オブジェクトのFileNameカスタムプロパティを一括で設定します"
     bl_options = {'REGISTER', 'UNDO'}
 
-    prop_name: bpy.props.StringProperty(
-        name="プロパティ名",
-        description="変更したいカスタムプロパティ名"
-    )
-    value: bpy.props.StringProperty(
-        name="値",
-        description="設定する値 (数値やベクトルも対応、例: 1.5, (1,2,3))"
+    filename: bpy.props.StringProperty(
+        name="file_name",
+        description="設定するFileName（全選択オブジェクトに同じ値が入ります）"
     )
 
     def execute(self, context):
         for obj in context.selected_objects:
-            try:
-                # 型自動判定
-                val = eval(self.value, {"__builtins__":None}, {})
-                obj[self.prop_name] = val
-            except Exception as e:
-                self.report({'WARNING'}, f"{obj.name}: {e}")
+            obj["file_name"] = self.filename
         return {'FINISHED'}
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
     
 #///////////////////////////////////////////////////////////////////////////////////
-# カスタムプロパティの一括変更
+# Colliderの一括変更
 #///////////////////////////////////////////////////////////////////////////////////  
     
 class MYADDON_OT_batch_add_collider(bpy.types.Operator):
@@ -583,8 +574,8 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
         self.layout.operator(MYADDON_OT_export_scene.bl_idname,
              text=MYADDON_OT_export_scene.bl_label)
         
-        self.layout.operator(MYADDON_OT_batch_set_custom_property.bl_idname,
-             text=MYADDON_OT_batch_set_custom_property.bl_label)
+        self.layout.operator(MYADDON_OT_batch_set_filename.bl_idname,
+             text=MYADDON_OT_batch_set_filename.bl_label)
         
         self.layout.operator(MYADDON_OT_batch_add_collider.bl_idname,
              text=MYADDON_OT_batch_add_collider.bl_label)
@@ -812,8 +803,8 @@ classes = (
     MYADDON_OT_add_filename,
     MYADDON_OT_add_collider,
     MYADDON_OT_remove_collider,
-    MYADDON_OT_batch_set_custom_property,
     MYADDON_OT_batch_add_collider,
+    MYADDON_OT_batch_set_filename,
     MyAddonPreferences,
     TOPBAR_MT_my_menu,
     OBJECT_PT_file_name,
