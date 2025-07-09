@@ -1,10 +1,10 @@
 import bpy
 import math
+import mathutils
 import bpy_extras
 import gpu
 import gpu_extras.batch
 import copy
-import mathutils
 import json
 
 
@@ -195,8 +195,19 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
         if "collider" in object:
             collider = dict()
             collider["type"] = object["collider"]
-            collider["center"] = object["collider_center"].to_list()
-            collider["size"] = object["collider_size"].to_list()
+            collider["center"] = (
+                object["collider_center"].to_list()
+                if hasattr(object["collider_center"], "to_list")
+                else list(object["collider_center"])
+            )
+            if object["collider"] == "BOX":
+                collider["size"]  = (
+                    object["collider_size"].to_list()
+                    if hasattr(object["collider_size"], "to_list")
+                    else list(object["collider_size"])
+                )
+            elif object["collider"] == "SPHERE":
+                collider["radius"] = object["collider_radius"] if "collider_radius" in object else 1.0
             json_object["collider"] = collider
 
         #1個分のjsonオブジェクトを親オブジェクトに登録
@@ -204,12 +215,9 @@ class MYADDON_OT_export_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
         #B直接の子供リストを走査
         if len(object.children) > 0:
             json_object["children"] = list()
-
         #子ノードへ進む
         for child in object.children:
             self.parse_scene_recursive_json(json_object["children"],child,level + 1)
-        
-        
  
 #///////////////////////////////////////////////////////////////////////////////////
 # 頂点を伸ばす
@@ -258,7 +266,6 @@ class MYADDON_OT_add_filename(bpy.types.Operator):
     bl_description = "['file_name']カスタムプロパティを追加します"
     bl_options = {"REGISTER","UNDO"}
 
-
     def execute(self,context):
         #['file_name']カスタムプロパティの追加
         context.object["file_name"] = ""
@@ -274,16 +281,49 @@ class MYADDON_OT_add_collider(bpy.types.Operator):
     bl_description = "['collider']カスタムプロパティを追加します"
     bl_options = {"REGISTER","UNDO"}
 
-
+    collider_type: bpy.props.EnumProperty(
+        name="Collider Type",
+        description="コライダーの種類を選択",
+        items=[
+            ('BOX','Box','BOXCollider'),
+            ('SPHERE','Sphere','SPHERECollider'),
+        ],
+        default='BOX'
+    )
+  
     def execute(self,context):
 
-
-        #['collider']カスタムプロパティ追加
-        context.object["collider"] = "BOX"
-        context.object["collider_center"] = mathutils.Vector((0,0,0))
-        context.object["collider_size"] = mathutils.Vector((2,2,2))
+        obj = context.object
+        if self.collider_type == 'BOX':
+            #['collider']カスタムプロパティ追加
+            obj["collider"] = "BOX"
+            obj["collider_center"] = mathutils.Vector((0,0,0))
+            obj["collider_size"] = mathutils.Vector((2,2,2))
+        elif self.collider_type == 'SPHERE':
+            obj["collider"] = "SPHERE"
+            obj["collider_center"] = mathutils.Vector((0,0,0))
+            obj["collider_radius"] = 1.0
         return {"FINISHED"}
+    
+    def invoke(self,context,event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+#///////////////////////////////////////////////////////////////////////////////////
+# collider削除
+#///////////////////////////////////////////////////////////////////////////////////
 
+class MYADDON_OT_remove_collider(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_remove_collider"
+    bl_label = "コライダー削除"
+    bl_description = "コライダーのカスタムプロパティを削除します"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        obj = context.object
+        for key in ["collider", "collider_center", "collider_size", "collider_radius"]:
+            if key in obj:
+                del obj[key]
+        return {'FINISHED'}
 
 #///////////////////////////////////////////////////////////////////////////////////
 # トップバーの拡張メニュー
@@ -358,14 +398,24 @@ class OBJECT_PT_collider(bpy.types.Panel):
     #サブメニュー描画
     def draw(self,context):
 
+        obj = context.object
+        if "collider" in obj:
 
-        if "collider" in context.object:
+            collider_type = obj["collider"]
+
             #既にプロパティがあれば、プロパティを表示
-            self.layout.prop(context.object, '["collider"]',text="Type")
-            self.layout.prop(context.object, '["collider_center"]',text="Center")
-            self.layout.prop(context.object, '["collider_size"]',text="Size")
+            self.layout.label(text=f"Type: {obj['collider']}")
+            self.layout.prop(obj, '["collider_center"]',text="Center")
+
+            if collider_type == "BOX":
+                self.layout.prop(obj, '["collider_size"]',text="Size")
+            elif collider_type == "SPHERE":
+                self.layout.prop(obj, '["collider_radius"]',text="Radius")
+
+            #削除ボタン
+            self.layout.operator("myaddon.myaddon_ot_remove_collider",text="コライダー削除",icon='X')
         else:
-            self.layout.operator(MYADDON_OT_add_collider.bl_idname)
+            self.layout.operator("myaddon.myaddon_ot_add_collider", text="コライダー追加", icon='PLUS')
 
 
 
@@ -375,93 +425,143 @@ class OBJECT_PT_collider(bpy.types.Panel):
 #///////////////////////////////////////////////////////////////////////////////////
 class DrawCollider:
 
-
     #描画ハンドル
     handle = None
 
-
     #3Dビューに登録する描画関数
     def draw_collider():
-
 
         #頂点データ
         vertices = {"pos":[]}
         #インデックスデータ
         indices = []
-
-
-        #各頂点の、オブジェクト中心からのオフセット
-        offsets = [
-            [-0.5,-0.5,-0.5],
-            [+0.5,-0.5,-0.5],
-            [-0.5,+0.5,-0.5],
-            [+0.5,+0.5,-0.5],
-            [-0.5,-0.5,+0.5],
-            [+0.5,-0.5,+0.5],
-            [-0.5,+0.5,+0.5],
-            [+0.5,+0.5,+0.5],
-        ]
-
+        #球の分割数
+        SEGMENTS = 32
 
         #現在シーンのオブジェクトリストを走査
         for object in bpy.context.scene.objects:
-
-
             #コライダープロパティがなければ、描画をスキップ
             if not "collider" in object:
                 continue
 
+            collider_type = object["collider"]
 
-            #中心点、サイズの変数を宣言
-            center = mathutils.Vector((0,0,0))
-            size   = mathutils.Vector((2,2,2))
-
-
-            #プロパティから値を取得
-            center=mathutils.Vector(object["collider_center"])
-            size=mathutils.Vector(object["collider_size"])
+            if collider_type == "BOX":
+                #中心点、サイズの変数を宣言
+                center = mathutils.Vector(object["collider_center"])
+                size   = mathutils.Vector(object["collider_size"])
+                 #各頂点の、オブジェクト中心からのオフセット
+                offsets = [
+                    [-0.5,-0.5,-0.5],[+0.5,-0.5,-0.5],
+                    [-0.5,+0.5,-0.5],[+0.5,+0.5,-0.5],
+                    [-0.5,-0.5,+0.5], [+0.5,-0.5,+0.5],
+                    [-0.5,+0.5,+0.5],[+0.5,+0.5,+0.5],
+                ]
            
-            #追加前の頂点数
-            start = len(vertices["pos"])
+                #追加前の頂点数
+                start = len(vertices["pos"])
            
-            #Boxの8頂点分for文を回す
-            for offset in offsets:
+                #Boxの8頂点分for文を回す
+                for offset in offsets:
+                    pos = copy.copy(center)
+                    #中心点を基準に各頂点毎にずらす
+                    pos[0]+=offset[0]*size[0]
+                    pos[1]+=offset[1]*size[1]
+                    pos[2]+=offset[2]*size[2]
+                    #ローカル座標からワールド座標に変換
+                    pos = object.matrix_world @ pos
+                    #頂点データリストに座標を追加
+                    vertices['pos'].append(pos)
+                    #前面を構成する辺の頂点インデックス
+                    indices.append([start+0,start+1])
+                    indices.append([start+2,start+3])
+                    indices.append([start+0,start+2])
+                    indices.append([start+1,start+3])
+                    #奥面
+                    indices.append([start+4,start+5])
+                    indices.append([start+6,start+7])
+                    indices.append([start+4,start+6])
+                    indices.append([start+5,start+7])
+                    #前と頂点を繋ぐ辺の頂点インデックス
+                    indices.append([start+0,start+4])
+                    indices.append([start+1,start+5])
+                    indices.append([start+2,start+6])
+                    indices.append([start+3,start+7])
+            elif collider_type == "SPHERE":
+                center = mathutils.Vector(object["collider_center"])
+                radius = object.get("collider_radius",1.0)
+                start = len(vertices["pos"])
+                #xy平面
+                xy_indices = []
+                for i in range(SEGMENTS):
+                    theta0 = 2*math.pi*i/SEGMENTS
+                    theta1 = 2*math.pi*(i+1)/SEGMENTS
+                    p0 = center + mathutils.Vector((
+                        math.cos(theta0)*radius,
+                        math.sin(theta0)*radius,
+                        0
+                    ))
+                    p1 = center + mathutils.Vector((
+                        math.cos(theta1)*radius,
+                        math.sin(theta1)*radius,
+                        0
+                    ))
+                    p0 = object.matrix_world @ p0
+                    p1 = object.matrix_world @ p1
+                    vertices['pos'].append(p0)
+                    xy_indices.append(len(vertices['pos'])-1)
+                for i in range(SEGMENTS):
+                    indices.append([xy_indices[i], xy_indices[(i+1)%SEGMENTS]])
+                # XZ平面
+                xz_indices = []
+                for i in range(SEGMENTS):
+                    theta0 = 2*math.pi*i/SEGMENTS
+                    theta1 = 2*math.pi*(i+1)/SEGMENTS
+                    p0 = center + mathutils.Vector((
+                        math.cos(theta0)*radius,
+                        0,
+                        math.sin(theta0)*radius
+                    ))
+                    p1 = center + mathutils.Vector((
+                        math.cos(theta1)*radius,
+                        0,
+                        math.sin(theta1)*radius
+                    ))
+                    p0 = object.matrix_world @ p0
+                    p1 = object.matrix_world @ p1
+                    vertices['pos'].append(p0)
+                    xz_indices.append(len(vertices['pos'])-1)
+                for i in range(SEGMENTS):
+                    indices.append([xz_indices[i], xz_indices[(i+1)%SEGMENTS]])
+                # YZ平面
+                yz_indices = []
+                for i in range(SEGMENTS):
+                    theta0 = 2*math.pi*i/SEGMENTS
+                    theta1 = 2*math.pi*(i+1)/SEGMENTS
+                    p0 = center + mathutils.Vector((
+                        0,
+                        math.cos(theta0)*radius,
+                        math.sin(theta0)*radius
+                    ))
+                    p1 = center + mathutils.Vector((
+                        0,
+                        math.cos(theta1)*radius,
+                        math.sin(theta1)*radius
+                    ))
+                    p0 = object.matrix_world @ p0
+                    p1 = object.matrix_world @ p1
+                    vertices['pos'].append(p0)
+                    yz_indices.append(len(vertices['pos'])-1)
+                for i in range(SEGMENTS):
+                    indices.append([yz_indices[i], yz_indices[(i+1)%SEGMENTS]])
 
-
-                pos = copy.copy(center)
-                #中心点を基準に各頂点毎にずらす
-                pos[0]+=offset[0]*size[0]
-                pos[1]+=offset[1]*size[1]
-                pos[2]+=offset[2]*size[2]
-                #ローカル座標からワールド座標に変換
-                pos = object.matrix_world @ pos
-                #頂点データリストに座標を追加
-                vertices['pos'].append(pos)
-                #前面を構成する辺の頂点インデックス
-                indices.append([start+0,start+1])
-                indices.append([start+2,start+3])
-                indices.append([start+0,start+2])
-                indices.append([start+1,start+3])
-                #奥面
-                indices.append([start+4,start+5])
-                indices.append([start+6,start+7])
-                indices.append([start+4,start+6])
-                indices.append([start+5,start+7])
-                #前と頂点を繋ぐ辺の頂点インデックス
-                indices.append([start+0,start+4])
-                indices.append([start+1,start+5])
-                indices.append([start+2,start+6])
-                indices.append([start+3,start+7])
-
+        if len(vertices["pos"]) == 0:
+            return
 
         #ビルトインのシェーダを取得
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-
-
         #バッチを作成(引数：シェーダ、トポロジー、頂点データ、インデックスデータ)
         batch = gpu_extras.batch.batch_for_shader(shader,"LINES",vertices,indices=indices)
-
-
         #シェーダのパラメータ設定
         color = [0.5, 1.0, 1.0, 1.0]
         shader.bind()
@@ -479,6 +579,7 @@ classes = (
     MYADDON_OT_export_scene,
     MYADDON_OT_add_filename,
     MYADDON_OT_add_collider,
+    MYADDON_OT_remove_collider,
     TOPBAR_MT_my_menu,
     OBJECT_PT_file_name,
     OBJECT_PT_collider,
