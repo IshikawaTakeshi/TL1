@@ -7,13 +7,13 @@ import gpu
 import gpu_extras.batch
 import copy
 import json
-import bpy_extras.io_utils import ImportHelper
+from bpy_extras.io_utils import ImportHelper
 
 
 # ブレンダーに登録するアドオン情報
 bl_info = {
     "name": "レベルエディタ",
-    "author": "Taro Kamata",
+    "author": "TAKESHI_ISHIKAWA",
     "version": (1, 0),
     "blender": (3, 3, 1),
     "location": "",
@@ -29,11 +29,11 @@ bl_info = {
 #///////////////////////////////////////////////////////////////////////////////////
 
 class MYADDON_OT_import_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelper):
-    bl_idname = "myaddon_myaddon_ot_import_scene"
+    bl_idname = "myaddon.myaddon_ot_import_scene"
     bl_label = "シーン読み込み"
     bl_description = "シーン情報をImportします"
     #入力するファイルの拡張子
-    filename_imt = ".json"
+    filename_ext = ".json"
 
     #==============================================================================
     # 実行関数
@@ -69,24 +69,37 @@ class MYADDON_OT_import_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
         file_name = obj_data.get("file_name", None)
         obj = None
 
+         # === resource_dir 取得 ===
+        ADDON_NAME = "level_editor"
+        addon_prefs = bpy.context.preferences.addons[ADDON_NAME].preferences
+        resource_dir = addon_prefs.resource_dir if hasattr(addon_prefs, "resource_dir") else ""
+
+        # === file_nameのパス解決 ===
+        abs_file_path = file_name
+        if file_name and not os.path.isabs(file_name) and resource_dir:
+            abs_file_path = os.path.join(resource_dir, file_name)
+
         if obj_type == "MESH" and file_name is not None:
-            ext = os.path.splitext(file_name)[1].lower()
-            if ext == ".obj":
-                bpy.ops.import_scene.obj(filepath=file_name)
+            ext = os.path.splitext(abs_file_path)[1].lower()
+
+            if ext == ".obj" and os.path.exists(abs_file_path):
+                bpy.ops.import_scene.obj(filepath=abs_file_path)
                 imported_objs = [o for o in bpy.context.selected_objects if o.type == "MESH"]
                 if imported_objs:
                     obj = imported_objs[0]
-            elif ext in [".gltf", ".glb"]:
-                bpy.ops.import_scene.gltf(filepath=file_name)
+            elif ext in [".gltf", ".glb"] and os.path.exists(abs_file_path):
+                bpy.ops.import_scene.gltf(filepath=abs_file_path)
                 imported_objs = [o for o in bpy.context.selected_objects if o.type == "MESH"]
                 if imported_objs:
                     obj = imported_objs[0]
+
             if obj:
                 obj.name = name
             else:
                 bpy.ops.object.add(type='EMPTY')
                 obj = bpy.context.active_object
                 obj.name = name
+
         elif obj_type == "CAMERA":
             bpy.ops.object.camera_add()
             obj = bpy.context.active_object
@@ -411,11 +424,11 @@ class MYADDON_OT_add_collider(bpy.types.Operator):
             #['collider']カスタムプロパティ追加
             obj["collider"] = "BOX"
             obj["collider_center"] = mathutils.Vector((0,0,0))
-            obj["collider_size"] = mathutils.Vector((2,2,2))
+            obj["collider_size"] = mathutils.Vector((1,1,1))
         elif self.collider_type == 'SPHERE':
             obj["collider"] = "SPHERE"
             obj["collider_center"] = mathutils.Vector((0,0,0))
-            obj["collider_radius"] = 1.0
+            obj["collider_radius"] = 0.5
         return {"FINISHED"}
     
     def invoke(self,context,event):
@@ -455,16 +468,23 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
 
 
         #トップバーの「エディターメニュー」に項目（オペレータ）を追加
+        #頂点を伸ばす
         self.layout.operator(MYADDON_OT_strecth_vertex.bl_idname,
              text=MYADDON_OT_strecth_vertex.bl_label)
 
-
+        #ICO球生成
         self.layout.operator(MYADDON_OT_create_ico_sphere.bl_idname,
              text=MYADDON_OT_create_ico_sphere.bl_label)
- 
+        
+        #シーンのインポート
+        self.layout.operator(MYADDON_OT_import_scene.bl_idname,
+             text=MYADDON_OT_import_scene.bl_label)
+
+        #シーンのエクスポート
         self.layout.operator(MYADDON_OT_export_scene.bl_idname,
              text=MYADDON_OT_export_scene.bl_label)
-
+        
+        
 
     #既存のメニューにサブメニューを追加
     def submenu(self,context):
@@ -542,7 +562,13 @@ class DrawCollider:
     handle = None
 
     #3Dビューに登録する描画関数
+    @staticmethod
     def draw_collider():
+        import mathutils
+        import math
+        import copy
+        import gpu
+        import gpu_extras
 
         #頂点データ
         vertices = {"pos":[]}
@@ -552,118 +578,95 @@ class DrawCollider:
         SEGMENTS = 32
 
         #現在シーンのオブジェクトリストを走査
-        for object in bpy.context.scene.objects:
+        for obj in bpy.context.scene.objects:
             #コライダープロパティがなければ、描画をスキップ
-            if not "collider" in object:
+            if "collider" not in obj:
                 continue
 
-            collider_type = object["collider"]
+            collider_type = obj["collider"]
 
             if collider_type == "BOX":
-                #中心点、サイズの変数を宣言
-                center = mathutils.Vector(object["collider_center"])
-                size   = mathutils.Vector(object["collider_size"])
-                 #各頂点の、オブジェクト中心からのオフセット
+                # 中心点、サイズの変数を宣言
+                # 必ずワールド実寸値で格納・取得すること
+                center = mathutils.Vector(obj["collider_center"])
+                size   = mathutils.Vector(obj["collider_size"])
+
+                # 各頂点の、オブジェクト中心からのオフセット
                 offsets = [
-                    [-0.5,-0.5,-0.5],[+0.5,-0.5,-0.5],
-                    [-0.5,+0.5,-0.5],[+0.5,+0.5,-0.5],
-                    [-0.5,-0.5,+0.5], [+0.5,-0.5,+0.5],
-                    [-0.5,+0.5,+0.5],[+0.5,+0.5,+0.5],
+                    [-1.0,-1.0,-1.0],[+1.0,-1.0,-1.0],
+                    [-1.0,+1.0,-1.0],[+1.0,+1.0,-1.0],
+                    [-1.0,-1.0,+1.0],[+1.0,-1.0,+1.0],
+                    [-1.0,+1.0,+1.0],[+1.0,+1.0,+1.0],
                 ]
-           
-                #追加前の頂点数
+
+                # 現在の頂点数を取得
                 start = len(vertices["pos"])
-           
-                #Boxの8頂点分for文を回す
+
+                # Boxの8頂点分for文を回す
                 for offset in offsets:
-                    pos = copy.copy(center)
-                    #中心点を基準に各頂点毎にずらす
-                    pos[0]+=offset[0]*size[0]
-                    pos[1]+=offset[1]*size[1]
-                    pos[2]+=offset[2]*size[2]
-                    #ローカル座標からワールド座標に変換
-                    pos = object.matrix_world @ pos
-                    #頂点データリストに座標を追加
+                    # サイズをワールド空間に合わせる（collider_sizeは必ずワールド実寸）
+                    pos = center + mathutils.Vector((
+                        offset[0]*size[0],
+                        offset[1]*size[1],
+                        offset[2]*size[2]
+                    ))
+                    # ローカル→ワールド変換
+                    pos = obj.matrix_world @ pos
                     vertices['pos'].append(pos)
-                    #前面を構成する辺の頂点インデックス
-                    indices.append([start+0,start+1])
-                    indices.append([start+2,start+3])
-                    indices.append([start+0,start+2])
-                    indices.append([start+1,start+3])
-                    #奥面
-                    indices.append([start+4,start+5])
-                    indices.append([start+6,start+7])
-                    indices.append([start+4,start+6])
-                    indices.append([start+5,start+7])
-                    #前と頂点を繋ぐ辺の頂点インデックス
-                    indices.append([start+0,start+4])
-                    indices.append([start+1,start+5])
-                    indices.append([start+2,start+6])
-                    indices.append([start+3,start+7])
+
+                # 辺を構成するインデックス（12本）
+                # 前面
+                indices += [
+                    [start+0, start+1], [start+1, start+3], [start+3, start+2], [start+2, start+0],
+                    # 奥面
+                    [start+4, start+5], [start+5, start+7], [start+7, start+6], [start+6, start+4],
+                    # 前後をつなぐ
+                    [start+0, start+4], [start+1, start+5], [start+2, start+6], [start+3, start+7]
+                ]
+
             elif collider_type == "SPHERE":
-                center = mathutils.Vector(object["collider_center"])
-                radius = object.get("collider_radius",1.0)
+                center = mathutils.Vector(obj["collider_center"])
+                radius = float(obj.get("collider_radius", 1.0))  # 必ずfloatで取得
                 start = len(vertices["pos"])
-                #xy平面
+                # xy平面
                 xy_indices = []
                 for i in range(SEGMENTS):
                     theta0 = 2*math.pi*i/SEGMENTS
-                    theta1 = 2*math.pi*(i+1)/SEGMENTS
-                    p0 = center + mathutils.Vector((
+                    p = center + mathutils.Vector((
                         math.cos(theta0)*radius,
                         math.sin(theta0)*radius,
                         0
                     ))
-                    p1 = center + mathutils.Vector((
-                        math.cos(theta1)*radius,
-                        math.sin(theta1)*radius,
-                        0
-                    ))
-                    p0 = object.matrix_world @ p0
-                    p1 = object.matrix_world @ p1
-                    vertices['pos'].append(p0)
+                    p = obj.matrix_world @ p
+                    vertices['pos'].append(p)
                     xy_indices.append(len(vertices['pos'])-1)
                 for i in range(SEGMENTS):
                     indices.append([xy_indices[i], xy_indices[(i+1)%SEGMENTS]])
-                # XZ平面
+                # xz平面
                 xz_indices = []
                 for i in range(SEGMENTS):
                     theta0 = 2*math.pi*i/SEGMENTS
-                    theta1 = 2*math.pi*(i+1)/SEGMENTS
-                    p0 = center + mathutils.Vector((
+                    p = center + mathutils.Vector((
                         math.cos(theta0)*radius,
                         0,
                         math.sin(theta0)*radius
                     ))
-                    p1 = center + mathutils.Vector((
-                        math.cos(theta1)*radius,
-                        0,
-                        math.sin(theta1)*radius
-                    ))
-                    p0 = object.matrix_world @ p0
-                    p1 = object.matrix_world @ p1
-                    vertices['pos'].append(p0)
+                    p = obj.matrix_world @ p
+                    vertices['pos'].append(p)
                     xz_indices.append(len(vertices['pos'])-1)
                 for i in range(SEGMENTS):
                     indices.append([xz_indices[i], xz_indices[(i+1)%SEGMENTS]])
-                # YZ平面
+                # yz平面
                 yz_indices = []
                 for i in range(SEGMENTS):
                     theta0 = 2*math.pi*i/SEGMENTS
-                    theta1 = 2*math.pi*(i+1)/SEGMENTS
-                    p0 = center + mathutils.Vector((
+                    p = center + mathutils.Vector((
                         0,
                         math.cos(theta0)*radius,
                         math.sin(theta0)*radius
                     ))
-                    p1 = center + mathutils.Vector((
-                        0,
-                        math.cos(theta1)*radius,
-                        math.sin(theta1)*radius
-                    ))
-                    p0 = object.matrix_world @ p0
-                    p1 = object.matrix_world @ p1
-                    vertices['pos'].append(p0)
+                    p = obj.matrix_world @ p
+                    vertices['pos'].append(p)
                     yz_indices.append(len(vertices['pos'])-1)
                 for i in range(SEGMENTS):
                     indices.append([yz_indices[i], yz_indices[(i+1)%SEGMENTS]])
@@ -674,14 +677,26 @@ class DrawCollider:
         #ビルトインのシェーダを取得
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
         #バッチを作成(引数：シェーダ、トポロジー、頂点データ、インデックスデータ)
-        batch = gpu_extras.batch.batch_for_shader(shader,"LINES",vertices,indices=indices)
+        batch = gpu_extras.batch.batch_for_shader(shader, "LINES", vertices, indices=indices)
         #シェーダのパラメータ設定
         color = [0.5, 1.0, 1.0, 1.0]
         shader.bind()
-        shader.uniform_float("color",color)
+        shader.uniform_float("color", color)
         #描画
         batch.draw(shader)
 
+class MyAddonPreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    resource_dir: bpy.props.StringProperty(
+        name="リソースフォルダ",
+        subtype='DIR_PATH',
+        default=""
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "resource_dir")
 
 #///////////////////////////////////////////////////////////////////////////////////
 # Blenderに登録するクラスリスト
@@ -689,10 +704,12 @@ class DrawCollider:
 classes = (
     MYADDON_OT_strecth_vertex,
     MYADDON_OT_create_ico_sphere,
+    MYADDON_OT_import_scene,
     MYADDON_OT_export_scene,
     MYADDON_OT_add_filename,
     MYADDON_OT_add_collider,
     MYADDON_OT_remove_collider,
+    MyAddonPreferences,
     TOPBAR_MT_my_menu,
     OBJECT_PT_file_name,
     OBJECT_PT_collider,
