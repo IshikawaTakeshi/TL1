@@ -1,4 +1,5 @@
 import bpy
+import os
 import math
 import mathutils
 import bpy_extras
@@ -6,6 +7,7 @@ import gpu
 import gpu_extras.batch
 import copy
 import json
+import bpy_extras.io_utils import ImportHelper
 
 
 # ブレンダーに登録するアドオン情報
@@ -21,6 +23,117 @@ bl_info = {
     "tracker_url": "",
     "category": "Object"
 }
+
+#///////////////////////////////////////////////////////////////////////////////////
+# オペレータ シーン読み込み
+#///////////////////////////////////////////////////////////////////////////////////
+
+class MYADDON_OT_import_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelper):
+    bl_idname = "myaddon_myaddon_ot_import_scene"
+    bl_label = "シーン読み込み"
+    bl_description = "シーン情報をImportします"
+    #入力するファイルの拡張子
+    filename_imt = ".json"
+
+    #==============================================================================
+    # 実行関数
+    #==============================================================================
+    def execute(self,context):
+
+        print("シーン情報をImportします")
+        self.import_json()
+        print("シーン情報をImportしました")
+        self.report({'INFO'},"シーン情報をImportしました")
+        return {'FINISHED'}
+    
+    #==============================================================================
+    # ファイル読み込み
+    #==============================================================================
+    def import_json(self):
+        #ファイル読み込み
+        with open(self.filepath,"rt",encoding="utf-8") as f:
+            data = json.load(f)
+
+        #オブジェクト生成
+        if "objects" in data:
+            for obj_data in data["objects"]:
+                self.create_object_recursive(obj_data, parent=None)
+    
+    #==============================================================================
+    # ファイル読み込み
+    #==============================================================================
+    def create_object_recursive(self,obj_data,parent):
+
+        name = obj_data.get("name", "ImportedObject")
+        obj_type = obj_data.get("type", "EMPTY")
+        file_name = obj_data.get("file_name", None)
+        obj = None
+
+        if obj_type == "MESH" and file_name is not None:
+            ext = os.path.splitext(file_name)[1].lower()
+            if ext == ".obj":
+                bpy.ops.import_scene.obj(filepath=file_name)
+                imported_objs = [o for o in bpy.context.selected_objects if o.type == "MESH"]
+                if imported_objs:
+                    obj = imported_objs[0]
+            elif ext in [".gltf", ".glb"]:
+                bpy.ops.import_scene.gltf(filepath=file_name)
+                imported_objs = [o for o in bpy.context.selected_objects if o.type == "MESH"]
+                if imported_objs:
+                    obj = imported_objs[0]
+            if obj:
+                obj.name = name
+            else:
+                bpy.ops.object.add(type='EMPTY')
+                obj = bpy.context.active_object
+                obj.name = name
+        elif obj_type == "CAMERA":
+            bpy.ops.object.camera_add()
+            obj = bpy.context.active_object
+            obj.name = name
+        elif obj_type == "LIGHT":
+            bpy.ops.object.light_add(type='POINT')
+            obj = bpy.context.active_object
+            obj.name = name
+        else:
+            bpy.ops.object.add(type='EMPTY')
+            obj = bpy.context.active_object
+            obj.name = name
+
+        #SRT
+        transform = obj_data.get("transform",{})
+        translate = transform.get("translation",)
+        rotate   = transform.get("rotation", )
+        scale = transform.get("scaling",) 
+        obj.location = translate
+        obj.rotation_euler = [math.radians(r) for r in rotate]
+        obj.scale = scale
+        
+        #カスタムプロパティ
+        if "file_name" in obj_data:
+            obj["file_name"] = obj_data["file_name"]
+
+        #コライダー情報
+        if "collider" in obj_data:
+            collider = obj_data["collider"]
+            obj["collider"] = collider.get("type","")
+            obj["collider_center"] = mathutils.Vector(collider["center"])
+            if "size" in collider:
+                obj["collider_size"] = mathutils.Vector(collider["size"])
+            elif "radius" in collider:
+                obj["collider_radius"] = collider["radius"]
+
+        #親子関係
+        if parent is not None:
+            obj.parent = parent
+        #子オブジェクト
+        for child_data in obj_data.get("children",[]):
+            self.create_object_recursive(child_data,parent=obj)
+
+
+
+    
+
 #///////////////////////////////////////////////////////////////////////////////////
 # オペレータ シーン出力
 #///////////////////////////////////////////////////////////////////////////////////
