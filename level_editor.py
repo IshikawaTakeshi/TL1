@@ -450,6 +450,105 @@ class MYADDON_OT_remove_collider(bpy.types.Operator):
             if key in obj:
                 del obj[key]
         return {'FINISHED'}
+    
+#///////////////////////////////////////////////////////////////////////////////////
+# カスタムプロパティの一括変更
+#///////////////////////////////////////////////////////////////////////////////////   
+class MYADDON_OT_batch_set_custom_property(bpy.types.Operator):
+    bl_idname = "myaddon.batch_set_custom_property"
+    bl_label = "カスタムプロパティ一括変更"
+    bl_description = "選択中のオブジェクトのカスタムプロパティを一括で変更します"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    prop_name: bpy.props.StringProperty(
+        name="プロパティ名",
+        description="変更したいカスタムプロパティ名"
+    )
+    value: bpy.props.StringProperty(
+        name="値",
+        description="設定する値 (数値やベクトルも対応、例: 1.5, (1,2,3))"
+    )
+
+    def execute(self, context):
+        for obj in context.selected_objects:
+            try:
+                # 型自動判定
+                val = eval(self.value, {"__builtins__":None}, {})
+                obj[self.prop_name] = val
+            except Exception as e:
+                self.report({'WARNING'}, f"{obj.name}: {e}")
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+#///////////////////////////////////////////////////////////////////////////////////
+# カスタムプロパティの一括変更
+#///////////////////////////////////////////////////////////////////////////////////  
+    
+class MYADDON_OT_batch_add_collider(bpy.types.Operator):
+    bl_idname = "myaddon.batch_add_collider"
+    bl_label = "コライダー一括追加・設定"
+    bl_description = "選択オブジェクトにコライダーをまとめて追加/設定します"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    collider_type: bpy.props.EnumProperty(
+        name="Collider Type",
+        description="コライダーの種類",
+        items=[
+            ('BOX','Box','BOX Collider'),
+            ('SPHERE','Sphere','Sphere Collider'),
+        ],
+        default='BOX'
+    )
+    collider_size: bpy.props.FloatVectorProperty(
+        name="Boxサイズ",
+        subtype='XYZ',
+        default=(1.0, 1.0, 1.0),
+        size=3
+    )
+    collider_radius: bpy.props.FloatProperty(
+        name="Sphere半径",
+        default=0.5
+    )
+    collider_center: bpy.props.FloatVectorProperty(
+        name="中心オフセット",
+        subtype='XYZ',
+        default=(0.0, 0.0, 0.0),
+        size=3
+    )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "collider_type")
+        if self.collider_type == 'BOX':
+            layout.prop(self, "collider_size")
+        elif self.collider_type == 'SPHERE':
+            layout.prop(self, "collider_radius")
+        layout.prop(self, "collider_center")
+
+    def execute(self, context):
+        for obj in context.selected_objects:
+            if self.collider_type == 'BOX':
+                obj["collider"] = "BOX"
+                obj["collider_center"] = mathutils.Vector(self.collider_center)
+                obj["collider_size"] = mathutils.Vector(self.collider_size)
+                # SPHEREプロパティがあれば消す
+                if "collider_radius" in obj:
+                    del obj["collider_radius"]
+            elif self.collider_type == 'SPHERE':
+                obj["collider"] = "SPHERE"
+                obj["collider_center"] = mathutils.Vector(self.collider_center)
+                obj["collider_radius"] = self.collider_radius
+                # BOXプロパティがあれば消す
+                if "collider_size" in obj:
+                    del obj["collider_size"]
+            # 他の不要なカスタムプロパティがあればここで整理可
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
 
 #///////////////////////////////////////////////////////////////////////////////////
 # トップバーの拡張メニュー
@@ -484,7 +583,11 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
         self.layout.operator(MYADDON_OT_export_scene.bl_idname,
              text=MYADDON_OT_export_scene.bl_label)
         
+        self.layout.operator(MYADDON_OT_batch_set_custom_property.bl_idname,
+             text=MYADDON_OT_batch_set_custom_property.bl_label)
         
+        self.layout.operator(MYADDON_OT_batch_add_collider.bl_idname,
+             text=MYADDON_OT_batch_add_collider.bl_label)
 
     #既存のメニューにサブメニューを追加
     def submenu(self,context):
@@ -709,6 +812,8 @@ classes = (
     MYADDON_OT_add_filename,
     MYADDON_OT_add_collider,
     MYADDON_OT_remove_collider,
+    MYADDON_OT_batch_set_custom_property,
+    MYADDON_OT_batch_add_collider,
     MyAddonPreferences,
     TOPBAR_MT_my_menu,
     OBJECT_PT_file_name,
