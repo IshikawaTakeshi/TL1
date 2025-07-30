@@ -64,6 +64,7 @@ class MYADDON_OT_import_scene(bpy.types.Operator,bpy_extras.io_utils.ExportHelpe
     #==============================================================================
     def create_object_recursive(self,obj_data,parent):
 
+
         name = obj_data.get("name", "ImportedObject")
         obj_type = obj_data.get("type", "EMPTY")
         file_name = obj_data.get("file_name", None)
@@ -389,14 +390,66 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
 class MYADDON_OT_add_filename(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_add_filename"
     bl_label = "FileName追加"
-    bl_description = "['file_name']カスタムプロパティを追加します"
-    bl_options = {"REGISTER","UNDO"}
+    bl_description = "['file_name']カスタムプロパティを追加し、同名アセットがあれば置き換え、なければCubeにします"
+    bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self,context):
-        #['file_name']カスタムプロパティの追加
-        context.object["file_name"] = ""
+    def execute(self, context):
+        obj = context.object
+        if obj is None:
+            self.report({"WARNING"}, "アクティブオブジェクトがありません")
+            return {"CANCELLED"}
+
+        # ['file_name']カスタムプロパティを追加
+        obj["file_name"] = ""
+
+        # file_nameが未入力ならCubeに
+        file_name = obj.get("file_name", "")
+
+        # アセットライブラリからfile_name一致を探索
+        asset_found, asset_info = self.find_asset_by_name(file_name)
+
+        if asset_found:
+            self.replace_object_with_asset(context, obj, asset_info)
+        else:
+            self.replace_object_with_cube(context, obj)
+
         return {"FINISHED"}
 
+    def find_asset_by_name(self, file_name):
+        # アセットライブラリ探索例（カタログやマネージャによって変わるため要調整）
+        for lib in bpy.context.preferences.filepaths.asset_libraries:
+            assets = bpy.types.AssetBrowserDisplay.library_assets(lib)
+            for asset in assets:
+                if asset.name == file_name:
+                    return True, asset
+        return False, None
+
+    def replace_object_with_asset(self, context, obj, asset_info):
+        # 既存オブジェクトの削除
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        bpy.ops.object.delete()
+
+        # アセットをリンク/インポートする処理
+        # asset_infoの取得方法、リンク/インポート方法は環境によって変化
+        # 例（要調整）:
+        # bpy.ops.wm.append(filepath=asset_info.filepath, directory=asset_info.directory, filename=asset_info.name)
+        # 追加後、位置をobjの元の位置に
+        self.report({"INFO"}, f"アセット'{asset_info.name}'で置き換えました")
+        pass  # 実装はプロジェクトやアセット管理方法に依存
+
+    def replace_object_with_cube(self, context, obj):
+        # 既存オブジェクトの削除
+        loc = obj.location.copy()
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        bpy.ops.object.delete()
+
+        # Cube追加
+        bpy.ops.mesh.primitive_cube_add(location=loc)
+        self.report({"INFO"}, "Cubeで置き換えました")
 
 #///////////////////////////////////////////////////////////////////////////////////
 # collider追加
